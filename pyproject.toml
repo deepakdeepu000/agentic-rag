@@ -1,0 +1,10 @@
+[project]
+name = "agentic-rag"
+version = "0.1.0"
+description = "Unified Agentic RAG Workspace"
+readme = "README.md"
+requires-python = ">=3.11"
+
+
+[workspace]
+members = ["ingestion-pipeline", "agentic-rag"]
