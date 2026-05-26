@@ -173,7 +173,7 @@ class IngestionConfig:
 
     # --- embedding -------------------------------------------------------
     embedding_model: str = field(default_factory=lambda: _env("INGESTION_EMBEDDING_MODEL", "mxbai-embed-large"))
-    embedding_batch_size: int = field(default_factory=lambda: int(_env("INGESTION_EMBEDDING_BATCH_SIZE", "16")))
+    embedding_batch_size: int = field(default_factory=lambda: int(_env("INGESTION_EMBEDDING_BATCH_SIZE", "2")))
     ollama_host: str = field(default_factory=lambda: _env("OLLAMA_HOST", "http://localhost:11434"))
 
     # --- vector store ----------------------------------------------------
