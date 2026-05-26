@@ -16,6 +16,7 @@ import signal
 import threading
 import time
 import logging
+from contextlib import suppress
 from utils.logging import _configure_logging
 
 from config.config import IngestionConfig
@@ -63,6 +64,9 @@ def _diagnostics_worker(pipeline: IngestionPipeline, interval: int = 60) -> None
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    shutdown_requested = threading.Event()
+    observer = None
+
     # ── 1. Config ──────────────────────────────────────────────────────
     config = IngestionConfig()
     _configure_logging(config.log_level)    # re-apply now we have config
@@ -75,45 +79,55 @@ def main() -> None:
     def on_file_ready(file_path: str, file_hash: str) -> None:
         try:
             pipeline.process(file_path, file_hash)
+        except KeyboardInterrupt:
+            shutdown_requested.set()
+            log.info("KeyboardInterrupt during ingestion of %s — shutting down …", file_path)
+            raise
         except Exception:
             log.exception("Unhandled error in on_file_ready for %s", file_path)
 
-    # ── 4 + 5. Start watcher (includes startup scan) ───────────────────
-    observer = start_watcher(config, on_file_ready)
-
-    # ── 6. Background: retry loop ─────────────────────────────────────
-    threading.Thread(
-        target=_retry_worker,
-        args=(pipeline,),
-        daemon=True,
-        name="retry-worker",
-    ).start()
-
-    # ── 7. Background: diagnostics ────────────────────────────────────
-    threading.Thread(
-        target=_diagnostics_worker,
-        args=(pipeline,),
-        daemon=True,
-        name="diagnostics-worker",
-    ).start()
-
-    # ── 8. Graceful shutdown on SIGTERM (Docker stop) ─────────────────
-    def _handle_sigterm(signum, frame):
-        log.info("SIGTERM received — shutting down …")
-        observer.stop()
-
-    signal.signal(signal.SIGTERM, _handle_sigterm)
-
-    log.info("Ingestion service running. Press Ctrl-C to stop.")
     try:
-        while observer.is_alive():
+        # ── 4 + 5. Start watcher (includes startup scan) ───────────────────
+        observer = start_watcher(config, on_file_ready)
+
+        # ── 6. Background: retry loop ─────────────────────────────────────
+        threading.Thread(
+            target=_retry_worker,
+            args=(pipeline,),
+            daemon=True,
+            name="retry-worker",
+        ).start()
+
+        # ── 7. Background: diagnostics ────────────────────────────────────
+        threading.Thread(
+            target=_diagnostics_worker,
+            args=(pipeline,),
+            daemon=True,
+            name="diagnostics-worker",
+        ).start()
+
+        # ── 8. Graceful shutdown on SIGTERM (Docker stop) ─────────────────
+        def _handle_sigterm(signum, frame):
+            log.info("SIGTERM received — shutting down …")
+            shutdown_requested.set()
+            if observer is not None:
+                observer.stop()
+
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+
+        log.info("Ingestion service running. Press Ctrl-C to stop.")
+        while observer.is_alive() and not shutdown_requested.is_set():
             observer.join(timeout=1)
     except KeyboardInterrupt:
-        log.info("KeyboardInterrupt — stopping observer …")
-        observer.stop()
-
-    observer.join()
-    log.info("Observer stopped. Exiting.")
+        shutdown_requested.set()
+        log.info("KeyboardInterrupt — shutting down …")
+    finally:
+        shutdown_requested.set()
+        if observer is not None:
+            observer.stop()
+            with suppress(Exception):
+                observer.join(timeout=5)
+        log.info("Observer stopped. Exiting.")
 
 
 if __name__ == "__main__":

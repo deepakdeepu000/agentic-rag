@@ -206,7 +206,7 @@ def scan_existing_files(
 def start_watcher(
     config: IngestionConfig,
     on_file_ready: Callable[[str, str], None],
-) -> Observer:
+):
     """
     1. Scan any files already present in the watch folder.
     2. Start a watchdog Observer for live additions / modifications.
@@ -216,13 +216,23 @@ def start_watcher(
     watch_path = Path(config.watch_folder)
     watch_path.mkdir(parents=True, exist_ok=True)
 
-    # Process files that arrived before this process started
-    scan_existing_files(config, on_file_ready)
-
     handler = IngestionEventHandler(config, on_file_ready)
     observer = Observer()
-    observer.schedule(handler, str(watch_path), recursive=True)
-    observer.start()
+    observer_started = False
+
+    try:
+        # Process files that arrived before this process started
+        scan_existing_files(config, on_file_ready)
+
+        observer.schedule(handler, str(watch_path), recursive=True)
+        observer.start()
+        observer_started = True
+
+    except BaseException:
+        if observer_started:
+            observer.stop()
+            observer.join(timeout=5)
+        raise
 
     log.info(
         "Watcher active: folder=%s  extensions=%s",
