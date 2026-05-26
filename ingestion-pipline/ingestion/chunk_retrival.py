@@ -8,8 +8,8 @@ from rank_bm25 import BM25Okapi
 
 from core.models import Chunk, RetrievedChunk
 from config.config import IngestionConfig
-from retrival.embedder import embed_query
-from retrival.chroma_store import dense_search
+from ingestion.embedder import embed_query
+from ingestion.chroma_store import dense_search
 
 
 log = logging.getLogger(__name__)
@@ -82,11 +82,12 @@ def deduplicate_results(results: List[RetrievedChunk]) -> List[RetrievedChunk]:
 
     for r in results:
         cid = r.chunk.chunk_id
-
-        if cid in seen:
+        # If chunk_id is missing, do not collapse distinct rows into one.
+        if cid is not None and cid in seen:
             continue
 
-        seen.add(cid)
+        if cid is not None:
+            seen.add(cid)
         deduped.append(r)
 
     return deduped
@@ -125,6 +126,7 @@ def hybrid_retrieve(
     dense_documents = dense_result["documents"][0]
     dense_metadatas = dense_result["metadatas"][0]
     dense_distances = dense_result["distances"][0]
+    dense_ids = dense_result.get("ids", [[]])[0]
 
     dense_scores_raw = [1.0 - float(d) for d in dense_distances]
     dense_scores = normalize_scores(dense_scores_raw)
@@ -152,13 +154,15 @@ def hybrid_retrieve(
 
     results = []
 
-    for doc, metadata, dense_score in zip(
+    for idx, (doc, metadata, dense_score) in enumerate(zip(
         dense_documents,
         dense_metadatas,
         dense_scores,
-    ):
+    )):
 
-        chunk_id = metadata.get("chunk_id")
+        chunk_id = metadata.get("chunk_id") if metadata else None
+        if chunk_id is None and idx < len(dense_ids):
+            chunk_id = dense_ids[idx]
 
         sparse_score = sparse_lookup.get(chunk_id, 0.0)
 

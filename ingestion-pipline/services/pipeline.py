@@ -10,12 +10,12 @@ from contextlib import contextmanager
 from typing import Optional
 
 from config.config import IngestionConfig
-from retrival.store_state import StateStore
-from retrival.extractor import extract
+from ingestion.store_state import StateStore
+from ingestion.extractor import extract
 from core.cleaner import clean
 from core.chunker import chunk_document
-from retrival.embedder import embed_chunks
-from retrival.chroma_store import (
+from ingestion.embedder import embed_chunks
+from ingestion.chroma_store import (
     collection_name_for_path,
     get_or_create_collection_by_name,
     upsert_chunks,

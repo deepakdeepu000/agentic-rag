@@ -1,12 +1,15 @@
 import argparse
 import sys
-from pathlib import Path
 
 from config.config import IngestionConfig
-from retrival.chroma_store import (
+from ingestion.chroma_store import (
     collection_name_for_path,
-    query_relevant_chunks,
+    get_or_create_collection_by_name,
 )
+
+from ingestion.chunk_retrival import hybrid_retrieve
+# from ingestion.reranker import rerank_chunks
+from core.models import Chunk
 
 
 def main() -> None:
@@ -41,27 +44,62 @@ def main() -> None:
     else:
         collection_name = config.chroma_collection
 
-    result = query_relevant_chunks(config, collection_name, args.query, args.top_k)
+    collection = get_or_create_collection_by_name(config, collection_name)
 
-    ids = result.get("ids", [[]])[0]
-    documents = result.get("documents", [[]])[0]
-    metadatas = result.get("metadatas", [[]])[0]
-    distances = result.get("distances", [[]])[0]
+    # Hybrid retrieval needs all chunks for BM25; reconstruct them from the collection.
+    raw = collection.get(include=["documents", "metadatas"])
+    ids = raw.get("ids", []) or []
+    documents = raw.get("documents", []) or []
+    metadatas = raw.get("metadatas", []) or []
+
+    all_chunks = []
+    for i, cid in enumerate(ids):
+        metadata = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
+        doc = documents[i] if i < len(documents) and documents[i] else ""
+        all_chunks.append(
+            Chunk(
+                chunk_id=cid,
+                file_hash=metadata.get("file_hash", ""),
+                file_path=metadata.get("file_path", ""),
+                filename=metadata.get("filename", ""),
+                doc_type=metadata.get("doc_type", ""),
+                chunk_index=metadata.get("chunk_index", 0),
+                total_chunks=metadata.get("total_chunks", 0),
+                text=doc,
+                metadata=metadata,
+            )
+        )
+
+    results = hybrid_retrieve(
+        query=args.query,
+        collection=collection,
+        all_chunks=all_chunks,
+        config=config,
+        top_k_dense=max(args.top_k * 4, args.top_k),
+        top_k_final=args.top_k,
+    )
+    
+    results = rerank_chunks(
+        query=args.query,
+        retrieved_chunks=results,
+        top_k=args.top_k,
+    )
 
     print(f"Collection: {collection_name}")
     print(f"Query: {args.query}")
     print("-")
-    for idx, chunk_id in enumerate(ids):
-        metadata = metadatas[idx] if idx < len(metadatas) else {}
-        distance = distances[idx] if idx < len(distances) else None
-        document = documents[idx] if idx < len(documents) else ""
-        preview = document
+    for idx, item in enumerate(results):
+        metadata = item.chunk.metadata or {}
+        preview = item.chunk.text
         print(f"Rank {idx + 1}")
-        print(f"chunk_id: {chunk_id}")
-        print(f"distance: {distance}")
+        print(f"chunk_id: {item.chunk.chunk_id}")
+        print(f"score: {item.score:.4f}")
+        print(f"dense_score: {item.dense_score:.4f}")
+        print(f"sparse_score: {item.sparse_score:.4f}")
+        print(f"metadata_boost: {item.metadata_boost:.4f}")
         print(f"file_path: {metadata.get('file_path')}")
         print(f"filename: {metadata.get('filename')}")
-        print(f"document length: {len(document)}")
+        print(f"document length: {len(preview)}")
         print(f"document preview: {preview}")
         print("-")
 

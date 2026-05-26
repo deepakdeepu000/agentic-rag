@@ -1,5 +1,3 @@
-
-
 import hashlib
 import logging
 import re
@@ -180,6 +178,19 @@ def _split_overlong_block(block: str, target_tokens: int, overlap_tokens: int) -
 
     return out
 
+def _log_overlimit_chunk(doc: RawDocument, section_path: List[str], chunk_text: str, limit: int) -> None:
+    """Temporary logger for chunks that exceed the embedding token limit."""
+    section_name = " > ".join(section_path) if section_path else "<root>"
+    token_count = _token_len(chunk_text)
+    preview = " ".join(chunk_text.split())[:160]
+    log.warning(
+        "TEMP token-limit hit: file=%s section=%s tokens=%d limit=%d preview=%r",
+        doc.file_path,
+        section_name,
+        token_count,
+        limit,
+        preview,
+    )
 
 def _split_text_to_limit(text: str, max_tokens: int, overlap_tokens: int) -> List[str]:
     """Split text into pieces that stay within a hard token ceiling."""
@@ -268,7 +279,6 @@ def _make_section_chunks(
     current_parts: List[str] = []
     carry = ""
     has_new_content = False
-    hard_limit = cfg.embedding_max_tokens
 
     def current_body() -> str:
         parts = [p for p in current_parts if p.strip()]
@@ -278,12 +288,20 @@ def _make_section_chunks(
         nonlocal carry, current_parts, has_new_content
         body = current_body()
         if has_new_content and body:
-            section_path_str = " > ".join(section_path) if section_path else ""
-            emitted.extend(
-                (section_path_str, chunk_text)
-                for chunk_text in _split_with_prefix(prefix, body, hard_limit, cfg.overlap_tokens)
-            )
-            carry = _tail_for_overlap(body, cfg.overlap_tokens)
+            full_chunk_text = f"{prefix}\n\n{body}".strip()
+            if _token_len(full_chunk_text) > cfg.embedding_max_tokens:
+                parts = _split_with_prefix(prefix, body, cfg.embedding_max_tokens, cfg.overlap_tokens)
+                for part in parts:
+                    if _token_len(part) > cfg.embedding_max_tokens:
+                        _log_overlimit_chunk(doc, section_path, part, cfg.embedding_max_tokens)
+                    emitted.append((" > ".join(section_path) if section_path else "", part))
+                # carry should be the overlap tail of the last emitted part's body
+                last_part = parts[-1]
+                last_body = last_part.split("\n\n", 1)[1] if "\n\n" in last_part else last_part
+                carry = _tail_for_overlap(last_body, cfg.overlap_tokens)
+            else:
+                emitted.append((" > ".join(section_path) if section_path else "", full_chunk_text))
+                carry = _tail_for_overlap(body, cfg.overlap_tokens)
         current_parts = [carry] if carry else []
         has_new_content = False
 

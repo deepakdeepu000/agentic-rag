@@ -60,7 +60,7 @@ class IngestionConfig:
     chroma_persist_dir: str = field(default_factory=lambda: _env("INGESTION_CHROMA_PERSIST_DIR", "./chroma_db"))
     state_db_path: str = field(default_factory=lambda: _env("INGESTION_STATE_DB_PATH", "./ingestion_state.db"))
 
-    # --- file handling ---------------------------------------------------
+    # --- fle handling ---------------------------------------------------
     supported_extensions: tuple = (
         ".pdf", ".docx", ".txt", ".md",
         ".html", ".csv",
@@ -80,7 +80,7 @@ class IngestionConfig:
     max_retries: int = field(default_factory=lambda: int(_env("INGESTION_MAX_RETRIES", "3")))
 
     # --- observability ---------------------------------------------------
-    log_level: str = field(default_factory=lambda: _env("LOG_LEVEL", "INFO"))
+    log_level: str = field(default_factory=lambda: _env("LOG_LEVEL", "WARNING").upper())
 
     # --- retrieval -------------------------------------------------------
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
@@ -88,13 +88,13 @@ class IngestionConfig:
     # --- per-doc-type chunk configs -------------------------------------
     chunk_configs: Dict[str, ChunkConfig] = field(default_factory=lambda: {
         # Dense prose
-        "pdf":   ChunkConfig(target_tokens=450, overlap_tokens=80, min_tokens=120, max_tokens=650),
-        "docx":  ChunkConfig(target_tokens=450, overlap_tokens=80, min_tokens=120, max_tokens=650),
+        "pdf":   ChunkConfig(target_tokens=350, overlap_tokens=80, min_tokens=120, max_tokens=400, embedding_max_tokens=512),
+        "docx":  ChunkConfig(target_tokens=350, overlap_tokens=80, min_tokens=120, max_tokens=400, embedding_max_tokens=512),
 
         # Mixed text / markdown / html
-        "txt":   ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300, embedding_max_tokens=512),
-        "md":    ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300, embedding_max_tokens=512),
-        "html":  ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300, embedding_max_tokens=512),
+        "txt":   ChunkConfig(target_tokens=300, overlap_tokens=40, min_tokens=80,  max_tokens=400, embedding_max_tokens=512),
+        "md":    ChunkConfig(target_tokens=300, overlap_tokens=40, min_tokens=80,  max_tokens=400, embedding_max_tokens=512),
+        "html":  ChunkConfig(target_tokens=300, overlap_tokens=40, min_tokens=80,  max_tokens=400, embedding_max_tokens=512),
 
         # Structured rows
         "csv":   ChunkConfig(target_tokens=140, overlap_tokens=20, min_tokens=40,  max_tokens=220, embedding_max_tokens=512),

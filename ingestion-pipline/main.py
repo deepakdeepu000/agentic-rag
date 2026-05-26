@@ -21,7 +21,7 @@ from utils.logging import _configure_logging
 
 from config.config import IngestionConfig
 from services.pipeline import IngestionPipeline
-from retrival.watcher import start_watcher
+from ingestion.watcher import start_watcher
 
 
 log = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def main() -> None:
             pipeline.process(file_path, file_hash)
         except KeyboardInterrupt:
             shutdown_requested.set()
-            log.info("KeyboardInterrupt during ingestion of %s — shutting down …", file_path)
+            log.warning("KeyboardInterrupt during ingestion of %s — shutting down …", file_path)
             raise
         except Exception:
             log.exception("Unhandled error in on_file_ready for %s", file_path)
@@ -115,19 +115,19 @@ def main() -> None:
 
         signal.signal(signal.SIGTERM, _handle_sigterm)
 
-        log.info("Ingestion service running. Press Ctrl-C to stop.")
+        log.warning("Ingestion service running. Press Ctrl-C to stop.")
         while observer.is_alive() and not shutdown_requested.is_set():
             observer.join(timeout=1)
     except KeyboardInterrupt:
         shutdown_requested.set()
-        log.info("KeyboardInterrupt — shutting down …")
+        log.warning("KeyboardInterrupt — shutting down …")
     finally:
         shutdown_requested.set()
         if observer is not None:
             observer.stop()
             with suppress(Exception):
                 observer.join(timeout=5)
-        log.info("Observer stopped. Exiting.")
+        log.warning("Observer stopped. Exiting.")
 
 
 if __name__ == "__main__":

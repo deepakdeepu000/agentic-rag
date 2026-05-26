@@ -234,7 +234,7 @@ def start_watcher(
             observer.join(timeout=5)
         raise
 
-    log.info(
+    log.warning(
         "Watcher active: folder=%s  extensions=%s",
         watch_path,
         ", ".join(sorted(config.supported_extensions)),

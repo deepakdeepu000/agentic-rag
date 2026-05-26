@@ -3,7 +3,7 @@ from typing import List
 
 from sentence_transformers import CrossEncoder
 
-from core.retriever import RetrievedChunk
+from core.models import RetrievedChunk
 
 log = logging.getLogger(__name__)
 
