@@ -181,6 +181,77 @@ def _split_overlong_block(block: str, target_tokens: int, overlap_tokens: int) -
     return out
 
 
+def _split_text_to_limit(text: str, max_tokens: int, overlap_tokens: int) -> List[str]:
+    """Split text into pieces that stay within a hard token ceiling."""
+    text = text.strip()
+    if not text:
+        return []
+
+    max_tokens = max(1, max_tokens)
+    overlap_tokens = max(0, overlap_tokens)
+
+    enc = _get_encoder()
+    if enc:
+        try:
+            tokens = enc.encode(text)
+            if len(tokens) <= max_tokens:
+                return [text]
+
+            step = max(1, max_tokens - overlap_tokens)
+            pieces: List[str] = []
+            for start in range(0, len(tokens), step):
+                part = enc.decode(tokens[start:start + max_tokens]).strip()
+                if part:
+                    pieces.append(part)
+            return pieces
+        except Exception:
+            pass
+
+    words = text.split()
+    if len(words) <= max_tokens:
+        return [text]
+
+    step = max(1, max_tokens - overlap_tokens)
+    pieces: List[str] = []
+    for start in range(0, len(words), step):
+        part = " ".join(words[start:start + max_tokens]).strip()
+        if part:
+            pieces.append(part)
+    return pieces
+
+
+def _split_with_prefix(prefix: str, body: str, hard_limit: int, overlap_tokens: int) -> List[str]:
+    """Ensure the final chunk text, including the document prefix, stays under the hard limit."""
+    prefix = prefix.strip()
+    body = body.strip()
+    full_text = f"{prefix}\n\n{body}".strip()
+
+    if _token_len(full_text) <= hard_limit:
+        return [full_text]
+
+    if hard_limit <= 1:
+        return [full_text]
+
+    prefix_tokens = _token_len(prefix)
+    body_limit = max(1, hard_limit - prefix_tokens - 8)
+    body_parts = _split_text_to_limit(body, body_limit, overlap_tokens)
+
+    if len(body_parts) == 1 and body_parts[0].strip() == body:
+        tighter_limit = max(1, body_limit // 2)
+        if tighter_limit < body_limit:
+            body_parts = _split_text_to_limit(body, tighter_limit, overlap_tokens)
+
+    result: List[str] = []
+    for part in body_parts:
+        candidate = f"{prefix}\n\n{part}".strip()
+        if _token_len(candidate) <= hard_limit:
+            result.append(candidate)
+        else:
+            result.extend(_split_with_prefix(prefix, part, max(1, hard_limit // 2), overlap_tokens))
+
+    return result if result else [full_text]
+
+
 def _make_section_chunks(
     doc: RawDocument,
     cfg: ChunkConfig,
@@ -197,6 +268,7 @@ def _make_section_chunks(
     current_parts: List[str] = []
     carry = ""
     has_new_content = False
+    hard_limit = cfg.embedding_max_tokens
 
     def current_body() -> str:
         parts = [p for p in current_parts if p.strip()]
@@ -206,7 +278,11 @@ def _make_section_chunks(
         nonlocal carry, current_parts, has_new_content
         body = current_body()
         if has_new_content and body:
-            emitted.append((" > ".join(section_path) if section_path else "", f"{prefix}\n\n{body}".strip()))
+            section_path_str = " > ".join(section_path) if section_path else ""
+            emitted.extend(
+                (section_path_str, chunk_text)
+                for chunk_text in _split_with_prefix(prefix, body, hard_limit, cfg.overlap_tokens)
+            )
             carry = _tail_for_overlap(body, cfg.overlap_tokens)
         current_parts = [carry] if carry else []
         has_new_content = False

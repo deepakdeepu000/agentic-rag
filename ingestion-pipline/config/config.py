@@ -29,6 +29,7 @@ class ChunkConfig:
     overlap_tokens: int
     min_tokens: int = 80
     max_tokens: int = 650
+    embedding_max_tokens: int = 512
     splitter: str = "semantic"
 
     @property
@@ -91,15 +92,15 @@ class IngestionConfig:
         "docx":  ChunkConfig(target_tokens=450, overlap_tokens=80, min_tokens=120, max_tokens=650),
 
         # Mixed text / markdown / html
-        "txt":   ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300),
-        "md":    ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300),
-        "html":  ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300),
+        "txt":   ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300, embedding_max_tokens=512),
+        "md":    ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300, embedding_max_tokens=512),
+        "html":  ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300, embedding_max_tokens=512),
 
         # Structured rows
-        "csv":   ChunkConfig(target_tokens=140, overlap_tokens=20, min_tokens=40,  max_tokens=220),
+        "csv":   ChunkConfig(target_tokens=140, overlap_tokens=20, min_tokens=40,  max_tokens=220, embedding_max_tokens=512),
 
         # OCR / image text
-        "image": ChunkConfig(target_tokens=220, overlap_tokens=40, min_tokens=60,  max_tokens=320),
+        "image": ChunkConfig(target_tokens=220, overlap_tokens=40, min_tokens=60,  max_tokens=320, embedding_max_tokens=512),
     })
 
     def log_summary(self) -> None:
