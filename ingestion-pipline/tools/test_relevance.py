@@ -78,12 +78,6 @@ def main() -> None:
         top_k_dense=max(args.top_k * 4, args.top_k),
         top_k_final=args.top_k,
     )
-    
-    results = rerank_chunks(
-        query=args.query,
-        retrieved_chunks=results,
-        top_k=args.top_k,
-    )
 
     print(f"Collection: {collection_name}")
     print(f"Query: {args.query}")
