@@ -173,7 +173,7 @@ class IngestionConfig:
 
     # --- embedding -------------------------------------------------------
     embedding_model: str = field(default_factory=lambda: _env("INGESTION_EMBEDDING_MODEL", "mxbai-embed-large"))
-    embedding_batch_size: int = field(default_factory=lambda: int(_env("INGESTION_EMBEDDING_BATCH_SIZE", "2")))
+    embedding_batch_size: int = field(default_factory=lambda: int(_env("INGESTION_EMBEDDING_BATCH_SIZE", "1")))
     ollama_host: str = field(default_factory=lambda: _env("OLLAMA_HOST", "http://localhost:11434"))
 
     # --- vector store ----------------------------------------------------
@@ -195,9 +195,9 @@ class IngestionConfig:
         "docx":  ChunkConfig(target_tokens=450, overlap_tokens=80, min_tokens=120, max_tokens=650),
 
         # Mixed text / markdown / html
-        "txt":   ChunkConfig(target_tokens=350, overlap_tokens=60, min_tokens=80,  max_tokens=500),
-        "md":    ChunkConfig(target_tokens=350, overlap_tokens=60, min_tokens=80,  max_tokens=500),
-        "html":  ChunkConfig(target_tokens=350, overlap_tokens=60, min_tokens=80,  max_tokens=500),
+        "txt":   ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300),
+        "md":    ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300),
+        "html":  ChunkConfig(target_tokens=220, overlap_tokens=60, min_tokens=80,  max_tokens=300),
 
         # Structured rows
         "csv":   ChunkConfig(target_tokens=140, overlap_tokens=20, min_tokens=40,  max_tokens=220),
