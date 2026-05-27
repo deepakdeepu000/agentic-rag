@@ -57,8 +57,11 @@ class RetrievalConfig:
 class IngestionConfig:
     # --- paths -----------------------------------------------------------
     watch_folder: str = field(default_factory=lambda: _env("INGESTION_WATCH_FOLDER", "./data"))
-    chroma_persist_dir: str = field(default_factory=lambda: _env("INGESTION_CHROMA_PERSIST_DIR", "./chroma_db"))
-    state_db_path: str = field(default_factory=lambda: _env("INGESTION_STATE_DB_PATH", "./ingestion_state.db"))
+    # Keep Chroma DB outside the ingestion-pipeline folder so other agents (e.g. RAG agent)
+    # can access the same persisted DB. Default: workspace root `../chroma_db` relative to
+    # `ingestion-pipline/` (adjust via env `INGESTION_CHROMA_PERSIST_DIR`).
+    chroma_persist_dir: str = field(default_factory=lambda: _env("INGESTION_CHROMA_PERSIST_DIR", "../chroma_db"))
+    state_db_path: str = field(default_factory=lambda: _env("INGESTION_STATE_DB_PATH", "../chroma_db/state/ingestion_state.db"))
 
     # --- fle handling ---------------------------------------------------
     supported_extensions: tuple = (

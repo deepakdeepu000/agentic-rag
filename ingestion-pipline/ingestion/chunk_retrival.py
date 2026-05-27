@@ -1,215 +1,161 @@
-import math
+
 import re
-import logging
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Sequence
+import time
+import concurrent.futures
+from typing import List, Dict, Any, Optional
 
 from rank_bm25 import BM25Okapi
-
 from core.models import Chunk, RetrievedChunk
 from config.config import IngestionConfig
 from ingestion.embedder import embed_query
 from ingestion.chroma_store import dense_search
 
-
-log = logging.getLogger(__name__)
-
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+
+# Cached BM25 matrix to avoid recompiling on every query
+_LAZY_BM25_MATRIX: Optional[BM25Okapi] = None
+_CURRENT_ECOSYSTEM_KEY: Optional[str] = None
 
 
 def tokenize(text: str) -> List[str]:
     return _WORD_RE.findall(text.lower())
 
 
-def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
-    if not a or not b:
-        return 0.0
-
-    n = min(len(a), len(b))
-
-    dot = sum(float(a[i]) * float(b[i]) for i in range(n))
-
-    norm_a = math.sqrt(sum(float(x) * float(x) for x in a[:n]))
-    norm_b = math.sqrt(sum(float(x) * float(x) for x in b[:n]))
-
-    if not norm_a or not norm_b:
-        return 0.0
-
-    return dot / (norm_a * norm_b)
-
-
-def normalize_scores(scores: List[float]) -> List[float]:
-    if not scores:
-        return []
-
-    mn = min(scores)
-    mx = max(scores)
-
-    if mx - mn < 1e-9:
-        return [0.0 for _ in scores]
-
-    return [(s - mn) / (mx - mn) for s in scores]
-
-
-def build_bm25_index(chunks: List[Chunk]):
-    tokenized = [tokenize(c.text) for c in chunks]
-    return BM25Okapi(tokenized)
-
-
-def metadata_boost(
-    query: str,
-    metadata: Dict[str, Any],
-) -> float:
+def metadata_boost(query: str, metadata: Dict[str, Any]) -> float:
     score = 0.0
-
-    query_lower = query.lower()
-
+    q = query.lower()
     section = str(metadata.get("section_path", "")).lower()
     filename = str(metadata.get("filename", "")).lower()
-
-    if section and any(word in section for word in query_lower.split()):
+    if section and any(word in section for word in q.split()):
         score += 0.10
-
-    if filename and any(word in filename for word in query_lower.split()):
+    if filename and any(word in filename for word in q.split()):
         score += 0.05
-
     return score
 
 
 def deduplicate_results(results: List[RetrievedChunk]) -> List[RetrievedChunk]:
     seen = set()
-    deduped = []
-
+    out = []
     for r in results:
         cid = r.chunk.chunk_id
-        # If chunk_id is missing, do not collapse distinct rows into one.
         if cid is not None and cid in seen:
             continue
-
         if cid is not None:
             seen.add(cid)
-        deduped.append(r)
+        out.append(r)
+    return out
 
-    return deduped
+
+def _threaded_vector_pipeline(query: str, config: IngestionConfig, collection, top_k_dense: int) -> Dict[str, Any]:
+    t0 = time.perf_counter()
+    query_embedding = embed_query(query, config)
+    embed_ms = (time.perf_counter() - t0) * 1000
+
+    t1 = time.perf_counter()
+    dense_result = dense_search(collection=collection, query_embedding=query_embedding, top_k=top_k_dense)
+    db_ms = (time.perf_counter() - t1) * 1000
+
+    return {"result": dense_result, "embed_ms": embed_ms, "db_ms": db_ms}
 
 
 def hybrid_retrieve(
     query: str,
     collection,
-    all_chunks: List[Chunk],
-    config: IngestionConfig,
+    all_chunks: Optional[List[Chunk]] = None,
+    config: IngestionConfig = None,
     top_k_dense: int = 30,
     top_k_final: int = 8,
 ) -> List[RetrievedChunk]:
+    global _LAZY_BM25_MATRIX, _CURRENT_ECOSYSTEM_KEY
 
-    if not all_chunks:
+    query = (query or "").strip()
+    if not query:
         return []
-
-    query = query.strip()
-
-    # ---------------------------------------------------
-    # QUERY EMBEDDING
-    # ---------------------------------------------------
-
-    query_embedding = embed_query(query, config)
-
-    # ---------------------------------------------------
-    # DENSE RETRIEVAL
-    # ---------------------------------------------------
-
-    dense_result = dense_search(
-        collection=collection,
-        query_embedding=query_embedding,
-        top_k=top_k_dense,
-    )
-
-    dense_documents = dense_result["documents"][0]
-    dense_metadatas = dense_result["metadatas"][0]
-    dense_distances = dense_result["distances"][0]
-    dense_ids = dense_result.get("ids", [[]])[0]
-
-    dense_scores_raw = [1.0 - float(d) for d in dense_distances]
-    dense_scores = normalize_scores(dense_scores_raw)
-
-    # ---------------------------------------------------
-    # BM25
-    # ---------------------------------------------------
-
-    bm25 = build_bm25_index(all_chunks)
 
     query_tokens = tokenize(query)
 
-    sparse_raw = bm25.get_scores(query_tokens)
-    sparse_scores = normalize_scores(list(map(float, sparse_raw)))
+    ecosystem_key = f"{len(all_chunks) if all_chunks else 0}::{all_chunks[-1].chunk_id if all_chunks else ''}"
 
-    # Map chunk_id -> sparse score
-    sparse_lookup = {
-        chunk.chunk_id: sparse_scores[idx]
-        for idx, chunk in enumerate(all_chunks)
-    }
+    # Run embedding + dense search in a thread while compiling BM25 matrix if needed
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        vector_future = executor.submit(_threaded_vector_pipeline, query, config, collection, top_k_dense)
 
-    # ---------------------------------------------------
-    # MERGE
-    # ---------------------------------------------------
+        if _LAZY_BM25_MATRIX is None or _CURRENT_ECOSYSTEM_KEY != ecosystem_key:
+            tokenized = [tokenize(c.text) for c in (all_chunks or [])]
+            if tokenized:
+                _LAZY_BM25_MATRIX = BM25Okapi(tokenized)
+                _CURRENT_ECOSYSTEM_KEY = ecosystem_key
 
-    results = []
+        sparse_scores_raw = _LAZY_BM25_MATRIX.get_scores(query_tokens) if _LAZY_BM25_MATRIX else []
+        vector_payload = vector_future.result()
 
-    for idx, (doc, metadata, dense_score) in enumerate(zip(
-        dense_documents,
-        dense_metadatas,
-        dense_scores,
-    )):
+    dense_result = vector_payload["result"]
 
-        chunk_id = metadata.get("chunk_id") if metadata else None
-        if chunk_id is None and idx < len(dense_ids):
-            chunk_id = dense_ids[idx]
+    dense_documents = (dense_result.get("documents") or [[]])[0]
+    dense_metadatas = (dense_result.get("metadatas") or [[]])[0]
+    dense_distances = (dense_result.get("distances") or [[]])[0]
+    dense_ids = (dense_result.get("ids") or [[]])[0]
+    dense_scores_raw = [1.0 - float(d) for d in dense_distances]
 
-        sparse_score = sparse_lookup.get(chunk_id, 0.0)
+    dense_candidates = {}
+    for idx, cid in enumerate(dense_ids):
+        dense_candidates[cid] = {
+            "doc": dense_documents[idx],
+            "metadata": dense_metadatas[idx],
+            "dense_score": dense_scores_raw[idx],
+            "dense_rank": idx + 1,
+        }
 
-        meta_boost = metadata_boost(query, metadata)
+    sparse_ranked_indices = sorted(range(len(sparse_scores_raw)), key=lambda k: sparse_scores_raw[k], reverse=True)
+    sparse_lookup = {}
+    for rank, idx in enumerate(sparse_ranked_indices, start=1):
+        if not all_chunks:
+            break
+        target_chunk = all_chunks[idx]
+        sparse_lookup[target_chunk.chunk_id] = {
+            "score": float(sparse_scores_raw[idx]),
+            "sparse_rank": rank,
+            "chunk_obj": target_chunk,
+        }
 
-        final_score = (
-            dense_score * config.retrieval.dense_weight
-            + sparse_score * config.retrieval.sparse_weight
-            + meta_boost
-        )
+    RRF_CONSTANT = 60.0
+    merged = []
+    all_ids = set(dense_candidates.keys()).union(set(sparse_lookup.keys()))
+    for cid in all_ids:
+        d = dense_candidates.get(cid)
+        s = sparse_lookup.get(cid)
+
+        rrf_d = 1.0 / (RRF_CONSTANT + d["dense_rank"]) if d else 0.0
+        rrf_s = 1.0 / (RRF_CONSTANT + s["sparse_rank"]) if s else 0.0
+
+        metadata = d["metadata"] if d else s["chunk_obj"].metadata
+        doc_text = d["doc"] if d else s["chunk_obj"].text
+
+        mb = metadata_boost(query, metadata)
+        final_score = rrf_d + rrf_s + mb
 
         chunk = Chunk(
-            chunk_id=chunk_id,
+            chunk_id=cid,
             file_hash=metadata.get("file_hash"),
             file_path=metadata.get("file_path"),
             filename=metadata.get("filename"),
             doc_type=metadata.get("doc_type"),
             chunk_index=metadata.get("chunk_index"),
             total_chunks=metadata.get("total_chunks"),
-            text=doc,
+            text=doc_text,
             metadata=metadata,
         )
 
-        results.append(
+        merged.append(
             RetrievedChunk(
                 chunk=chunk,
                 score=final_score,
-                dense_score=dense_score,
-                sparse_score=sparse_score,
-                metadata_boost=meta_boost,
+                dense_score=d["dense_score"] if d else 0.0,
+                sparse_score=s["score"] if s else 0.0,
+                metadata_boost=mb,
             )
         )
 
-    # ---------------------------------------------------
-    # SORT
-    # ---------------------------------------------------
-
-    results.sort(key=lambda x: x.score, reverse=True)
-
-    # ---------------------------------------------------
-    # DEDUPLICATION
-    # ---------------------------------------------------
-
-    results = deduplicate_results(results)
-    
-    # ---------------------------------------------------
-    # FINAL TOP K
-    # ---------------------------------------------------
-
-    return results[:top_k_final]
+    merged.sort(key=lambda x: x.score, reverse=True)
+    deduped = deduplicate_results(merged)
+    return deduped[:top_k_final]
