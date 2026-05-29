@@ -6,13 +6,16 @@ dist/
 wheels/
 chroma_db/
 chromadb/
+sessions/
 data/
 *.egg-info
 *.db
 *.db-shm
 *.db-wal
+.env
+*.log
+*lock
 .python-version
-
 
 # Virtual environments
 .venv
