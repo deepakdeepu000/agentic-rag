@@ -13,7 +13,7 @@ from core.memory import SQLiteSessionStore, load_session_into_state
 from core.state import RAGState
 from nodes.graph import build_graph
 from utils.mcp_result_utils import extract_mcp_text
-from schemas import ChatResponse
+from utils.schemas import ChatResponse
 from services.session_service import SessionService
 
 logger = logging.getLogger(__name__)

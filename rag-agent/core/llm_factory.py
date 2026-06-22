@@ -61,6 +61,7 @@ def get_chat_model(settings: Settings, purpose: Purpose):
                 "langchain-google-genai is required for GEMINI providers. "
                 "Install with: pip install langchain-google-genai"
             ) from exc
+
         return ChatGoogleGenerativeAI(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,

@@ -7,7 +7,7 @@ from dataclasses import asdict
 from typing import Any
 
 from core.memory import SQLiteSessionStore, SessionRecord
-from schemas import SessionDetailResponse, SessionListItem, SessionMessage
+from utils.schemas import SessionDetailResponse, SessionListItem, SessionMessage
 
 
 class SessionService:

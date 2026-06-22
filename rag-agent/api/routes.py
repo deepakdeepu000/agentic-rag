@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from schemas import (
+from utils.schemas import (
     ChatRequest,
     ChatResponse,
     SessionCreateResponse,

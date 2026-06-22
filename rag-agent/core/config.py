@@ -11,6 +11,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # ── Ollama ─────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     openai_api_key: str = Field("", alias="OPENAI_API_KEY")
 
-    gemini_model: str = Field("gemini-3.1-flash-lite", alias="GEMINI_MODEL")
+    gemini_model: str = Field("gemini-3.1-flash", alias="GEMINI_MODEL")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
 
     # Optional override for router-only model
