@@ -30,7 +30,7 @@ dependencies = [
 
 
 [workspace]
-members = ["ingestion-pipeline", rag-agent"]
+members = ["ingestion-pipeline", "rag-agent"]
 
 [tool.uv.workspace]
 members = [
